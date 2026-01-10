@@ -1,0 +1,256 @@
+import os
+import base64
+import re
+from email.utils import parsedate_to_datetime
+from typing import List
+
+from flask import Flask, jsonify, render_template, request
+
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+
+from gmail_service import (
+    get_all_labels,
+    get_label_map,
+    apply_label,
+    remove_label,
+    archive_message,
+    delete_message,
+)
+from openai_service import get_mail_recommendation
+
+SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
+
+app = Flask(__name__)
+
+# Globals kept simple for single-user local app
+SERVICE = None
+AVAILABLE_LABELS: List[str] = []
+LABEL_MAP = {}
+MESSAGE_IDS: List[str] = []
+ANALYSIS_CACHE = {}
+
+
+def init_service():
+    global SERVICE, AVAILABLE_LABELS, LABEL_MAP
+    creds = None
+    if os.path.exists("token.json"):
+        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                "credentials.json", SCOPES
+            )
+            # Opens a browser for OAuth once
+            creds = flow.run_local_server(port=0)
+        with open("token.json", "w") as token:
+            token.write(creds.to_json())
+
+    SERVICE = build("gmail", "v1", credentials=creds)
+    AVAILABLE_LABELS = get_all_labels(SERVICE)
+    LABEL_MAP = get_label_map(SERVICE)
+
+
+def extract_message_text(payload):
+    texts = []
+    mime = payload.get("mimeType", "")
+    body = payload.get("body", {})
+    data = body.get("data")
+    if data and (mime.startswith("text/plain") or mime.startswith("text/html")):
+        try:
+            decoded = base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+            if mime.startswith("text/html"):
+                decoded = re.sub(r"<[^>]+>", " ", decoded)
+            texts.append(decoded)
+        except Exception:
+            pass
+    for part in payload.get("parts", []):
+        texts.append(extract_message_text(part))
+    return "\n".join(t for t in texts if t)
+
+
+def load_inbox_ids(max_fetch: int = 200):
+    """Load up to max_fetch message IDs from INBOX into MESSAGE_IDS."""
+    global MESSAGE_IDS
+    MESSAGE_IDS = []
+    next_page_token = None
+    fetched = 0
+    try:
+        while True:
+            params = {"userId": "me", "q": "in:inbox", "maxResults": 100}
+            if next_page_token:
+                params["pageToken"] = next_page_token
+            results = SERVICE.users().messages().list(**params).execute()
+            msgs = results.get("messages", [])
+            for m in msgs:
+                if fetched >= max_fetch:
+                    break
+                MESSAGE_IDS.append(m["id"])
+                fetched += 1
+            if fetched >= max_fetch:
+                break
+            next_page_token = results.get("nextPageToken")
+            if not next_page_token:
+                break
+    except HttpError as e:
+        print(f"Error listing messages: {e}")
+
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.route("/api/labels", methods=["GET"])
+def api_labels():
+    return jsonify({"labels": AVAILABLE_LABELS})
+
+
+@app.route("/api/messages/count", methods=["GET"])
+def api_messages_count():
+    return jsonify({"count": len(MESSAGE_IDS)})
+
+
+@app.route("/api/messages/item", methods=["GET"])
+def api_message_item():
+    try:
+        index = int(request.args.get("index", "0"))
+    except ValueError:
+        return jsonify({"error": "Invalid index"}), 400
+    if index < 0 or index >= len(MESSAGE_IDS):
+        return jsonify({"error": "Index out of range"}), 404
+
+    msg_id = MESSAGE_IDS[index]
+    try:
+        msg = SERVICE.users().messages().get(userId="me", id=msg_id, format="full").execute()
+        headers = msg.get("payload", {}).get("headers", [])
+        sender = next((h["value"] for h in headers if h["name"] == "From"), "Onbekend")
+        subject = next((h["value"] for h in headers if h["name"] == "Subject"), "(geen onderwerp)")
+        date_str = next((h["value"] for h in headers if h["name"] == "Date"), "Onbekend")
+
+        # Parse date
+        try:
+            date_obj = parsedate_to_datetime(date_str)
+            date_formatted = date_obj.strftime("%d-%m-%Y")
+        except Exception:
+            date_formatted = "Onbekend"
+
+        # Clean sender display
+        if "<" in sender:
+            sender = sender.split("<")[0].strip()
+
+        full_text = extract_message_text(msg.get("payload", {})) or ""
+        current_label_ids = msg.get("labelIds", [])
+        current_labels = [LABEL_MAP.get(lid, lid) for lid in current_label_ids]
+
+        return jsonify({
+            "id": msg_id,
+            "subject": subject,
+            "sender": sender,
+            "date": date_formatted,
+            "body": full_text,
+            "labels": current_labels,
+            "index": index,
+            "total": len(MESSAGE_IDS),
+        })
+    except HttpError as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/messages/<message_id>/labels", methods=["POST"])
+def api_set_labels(message_id):
+    data = request.get_json(silent=True) or {}
+    desired_labels = data.get("labels", [])
+    if not isinstance(desired_labels, list):
+        return jsonify({"error": "labels must be list"}), 400
+
+    # Get current labels for message
+    try:
+        msg = SERVICE.users().messages().get(userId="me", id=message_id, format="minimal").execute()
+        current_label_ids = msg.get("labelIds", [])
+        current_labels = set(LABEL_MAP.get(lid, lid) for lid in current_label_ids)
+    except HttpError as e:
+        return jsonify({"error": str(e)}), 500
+
+    desired_set = set(desired_labels)
+
+    # Only consider user labels (exclude system labels in caps)
+    current_user_labels = set(l for l in current_labels if not l.isupper())
+
+    to_add = desired_set - current_user_labels
+    to_remove = current_user_labels - desired_set
+
+    added = []
+    removed = []
+    for l in to_add:
+        if apply_label(SERVICE, message_id, l):
+            added.append(l)
+    for l in to_remove:
+        if remove_label(SERVICE, message_id, l):
+            removed.append(l)
+
+    return jsonify({"added": added, "removed": removed})
+
+
+@app.route("/api/messages/<message_id>/archive", methods=["POST"])
+def api_archive(message_id):
+    ok = archive_message(SERVICE, message_id)
+    return jsonify({"archived": ok})
+
+
+@app.route("/api/messages/<message_id>/delete", methods=["POST"])
+def api_delete(message_id):
+    ok = delete_message(SERVICE, message_id)
+    return jsonify({"deleted": ok})
+
+
+@app.route("/api/messages/<message_id>/analysis", methods=["GET"])
+def api_get_analysis(message_id):
+    text = ANALYSIS_CACHE.get(message_id)
+    if text is None:
+        return jsonify({"error": "Not analyzed"}), 404
+    return jsonify({"text": text})
+
+
+@app.route("/api/messages/<message_id>/analyze", methods=["POST"])
+def api_analyze(message_id):
+    # If cached, return cached without re-generating
+    if message_id in ANALYSIS_CACHE:
+        return jsonify({"text": ANALYSIS_CACHE[message_id], "cached": True})
+    try:
+        msg = SERVICE.users().messages().get(userId="me", id=message_id, format="full").execute()
+        headers = msg.get("payload", {}).get("headers", [])
+        sender = next((h["value"] for h in headers if h["name"] == "From"), "Onbekend")
+        subject = next((h["value"] for h in headers if h["name"] == "Subject"), "(geen onderwerp)")
+        body_text = extract_message_text(msg.get("payload", {})) or ""
+        current_label_ids = msg.get("labelIds", [])
+        current_labels = [LABEL_MAP.get(lid, lid) for lid in current_label_ids]
+
+        # Call AI service
+        recommendation_text = get_mail_recommendation(
+            sender,
+            subject,
+            body_text,
+            AVAILABLE_LABELS,
+            current_labels,
+        )
+        ANALYSIS_CACHE[message_id] = recommendation_text or "Geen aanbeveling ontvangen"
+        return jsonify({"text": ANALYSIS_CACHE[message_id], "cached": False})
+    except HttpError as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def startup():
+    init_service()
+    load_inbox_ids()
+
+
+if __name__ == "__main__":
+    startup()
+    app.run(host="127.0.0.1", port=5000, debug=True)

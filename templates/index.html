@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="nl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gmail Organizer</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="top-bar">
+        <div class="left-actions">
+          <button id="btn-ai" class="btn">Analyseer met AI</button>
+          <button id="btn-label" class="btn primary">Label</button>
+        </div>
+        <div class="right-actions">
+          <button id="btn-archive" class="btn">Archiveer</button>
+          <button id="btn-delete" class="btn danger">Verwijder</button>
+        </div>
+      </header>
+
+      <main class="mail-view">
+        <div class="meta">
+          <div class="subject" id="subject">(onderwerp)</div>
+          <div class="from-date">
+            <span id="sender">(afzender)</span>
+            <span>•</span>
+            <span id="date">(datum)</span>
+          </div>
+          <div class="labels" id="labels"></div>
+        </div>
+        <div class="content" id="content"></div>
+      </main>
+
+      <footer class="bottom-bar">
+        <button id="btn-prev" class="btn">Vorige</button>
+        <div class="index" id="index">0/0</div>
+        <button id="btn-next" class="btn">Volgende</button>
+      </footer>
+    </div>
+
+    <!-- Right side AI Panel -->
+    <div id="ai-panel" class="side-panel">
+      <div class="panel-header">
+        <div>AI Analyse</div>
+        <button id="ai-close" class="btn">Sluit</button>
+      </div>
+      <div id="ai-content" class="panel-content"></div>
+    </div>
+
+    <!-- Label Modal -->
+    <div id="label-modal" class="modal hidden">
+      <div class="modal-content">
+        <h3>Kies labels</h3>
+        <div id="label-list" class="label-list"></div>
+        <div class="modal-actions">
+          <button id="label-ok" class="btn primary">OK</button>
+          <button id="label-cancel" class="btn">Annuleren</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+  </html>
