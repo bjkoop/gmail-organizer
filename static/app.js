@@ -44,6 +44,9 @@ async function loadMessage(index) {
   currentMessageId = data.id;
   currentLabels = data.labels || [];
   analysisText = null; // reset when switching messages
+  // Clear AI panel content to avoid showing previous mail's analysis
+  const aiEl = document.getElementById('ai-content');
+  if (aiEl) aiEl.textContent = '';
 
   document.getElementById('subject').textContent = data.subject || '(geen onderwerp)';
   document.getElementById('sender').textContent = data.sender || '(afzender onbekend)';

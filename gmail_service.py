@@ -9,16 +9,12 @@ def get_all_labels(service):
         service: Gmail API service object
 
     Returns:
-        List of label names (excluding system labels in CAPS)
+        List of label names (including system labels like STARRED/IMPORTANT/CATEGORY_*)
     """
     try:
         results = service.users().labels().list(userId="me").execute()
         labels = results.get("labels", [])
-        # Filter out system labels (all caps like INBOX, SENT, etc.)
-        label_names = [
-            label["name"] for label in labels
-            if not label["name"].isupper() and label["type"] == "user"
-        ]
+        label_names = [label.get("name", "") for label in labels if label.get("name")]
         return sorted(label_names)
     except HttpError as error:
         print(f"Error getting labels: {error}")
