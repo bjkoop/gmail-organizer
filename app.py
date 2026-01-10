@@ -213,11 +213,13 @@ def api_set_labels(message_id):
 
     desired_set = set(desired_labels)
 
-    # Only consider user labels (exclude system labels in caps)
-    current_user_labels = set(l for l in current_labels if not l.isupper())
+    # Consider all labels; protect a few special ones from removal/add for safety
+    # Avoid changing core mailbox controls via the modal
+    unmodifiable = {"INBOX", "TRASH", "SPAM"}
 
-    to_add = desired_set - current_user_labels
-    to_remove = current_user_labels - desired_set
+    current_set = set(current_labels)
+    to_add = {l for l in (desired_set - current_set) if l not in unmodifiable}
+    to_remove = {l for l in (current_set - desired_set) if l not in unmodifiable}
 
     added = []
     removed = []

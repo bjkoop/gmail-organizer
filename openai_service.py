@@ -33,19 +33,40 @@ def get_mail_recommendation(sender, subject, body_text, available_labels, curren
     labels_text = ", ".join(available_labels) if available_labels else "(geen)"
     current_labels_text = ", ".join(current_labels) if current_labels else "(geen)"
 
+    # Heuristic grouping to enforce strict hierarchy
+    def matches_any(s, patterns):
+        return any(re.search(p, s, re.IGNORECASE) for p in patterns)
+
+    retention_patterns = [r"retent", r"retention", r"bewaar", r"bewaren", r"archief", r"archive"]
+    group_patterns = [r"^work$", r"werk", r"^private$", r"priv[eé]", r"\bRUG\b"]
+    optional_flags = []
+
+    retention_candidates = [l for l in available_labels if matches_any(l, retention_patterns)]
+    group_candidates = [l for l in available_labels if matches_any(l, group_patterns)]
+    # System flags (present exactly like these names), plus CATEGORY_*
+    for l in available_labels:
+        if l == "STARRED" or l == "IMPORTANT" or l.startswith("CATEGORY_"):
+            optional_flags.append(l)
+
+    # Build explicit, constrained instruction for strict selection
     prompt = (
-        "Je bent een e-mailopruimassistent. Beoordeel ALLEEN deze ene mail en geef een zo kort mogelijk advies gericht op inbox opruimen.\n"
-        "Als de mail zonder risico weg kan, kies: VERWIJDEREN. Anders: ARCHIVEREN, LABEL: <naam>, of BEWAREN.\n\n"
+        "Je bent een e-mailopruimassistent. Beoordeel ALLEEN deze ene mail en geef een kort advies.\n"
+        "Kies een actie en labels volgens deze STRIKTE hiërarchie:\n"
+        "1) Eerst EXACT ÉÉN retentie-label (uit: " + ", ".join(retention_candidates or ["GEEN"]) + ")\n"
+        "2) Daarna EXACT ÉÉN label uit werk/privé/RUG (uit: " + ", ".join(group_candidates or ["GEEN"]) + ")\n"
+        "3) Optioneel ÉÉN extra vlag-label (uit: " + ", ".join(optional_flags or ["GEEN"]) + ")\n"
+        "Selecteer labels ALLEEN uit de bovenstaande lijsten. Gebruik maximaal één per categorie.\n"
+        "Als een categorie geen geschikte label heeft, vul die in als GEEN.\n"
+        "Als een email niet belangrijk is, kies dan VERWIJDEREN als actie. De bedoeling is immers om de mailbox op te ruimen.\n"
+        "Geef altijd een korte onderbouwing voor je keuze. \n\n"
         f"Afzender: {sender}\n"
         f"Onderwerp: {subject}\n"
         f"Huidige labels: {current_labels_text}\n"
         f"Beschikbare labels: {labels_text}\n\n"
         "Inhoud:\n"
         f"{body_text}\n\n"
-        "Antwoord met één korte regel in het Nederlands, zonder extra uitleg.\n"
-        "Formaat: Actie: VERWIJDEREN | ARCHIVEREN | LABEL: <naam> | BEWAREN."
-        "Let op! Bij ARCHIVEREN is een label verplicht."
-        "Indien de mail niet belangrijk is, geef dan VERWIJDEREN als advies."
+        "Antwoord met ÉÉN regel in het Nederlands, exact dit formaat (zonder extra tekst):\n"
+        "Actie: VERWIJDEREN | ARCHIVEREN | BEWAREN; Retentie: <LABEL|GEEN>; Groep: <LABEL|GEEN>; Extra: <LABEL|GEEN>"
     )
 
     try:
