@@ -14,6 +14,10 @@ client = AzureOpenAI(
     azure_endpoint=AZURE_OPENAI_ENDPOINT,
 )
 
+# Label pattern configuration for hierarchical categorization
+RETENTION_LABEL_PATTERNS = [r"retent", r"retention", r"bewaar", r"bewaren", r"archief", r"archive"]
+GROUP_LABEL_PATTERNS = [r"^work$", r"werk", r"^private$", r"priv[eé]", r"\bRUG\b"]
+
 
 def get_mail_recommendation(sender, subject, body_text, available_labels, current_labels):
     """
@@ -37,12 +41,10 @@ def get_mail_recommendation(sender, subject, body_text, available_labels, curren
     def matches_any(s, patterns):
         return any(re.search(p, s, re.IGNORECASE) for p in patterns)
 
-    retention_patterns = [r"retent", r"retention", r"bewaar", r"bewaren", r"archief", r"archive"]
-    group_patterns = [r"^work$", r"werk", r"^private$", r"priv[eé]", r"\bRUG\b"]
     optional_flags = []
 
-    retention_candidates = [l for l in available_labels if matches_any(l, retention_patterns)]
-    group_candidates = [l for l in available_labels if matches_any(l, group_patterns)]
+    retention_candidates = [l for l in available_labels if matches_any(l, RETENTION_LABEL_PATTERNS)]
+    group_candidates = [l for l in available_labels if matches_any(l, GROUP_LABEL_PATTERNS)]
     # System flags (present exactly like these names), plus CATEGORY_*
     for l in available_labels:
         if l == "STARRED" or l == "IMPORTANT" or l.startswith("CATEGORY_"):
