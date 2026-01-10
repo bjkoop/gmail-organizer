@@ -57,7 +57,7 @@ def get_mail_recommendation(sender, subject, body_text, available_labels, curren
         "3) Optioneel ÉÉN extra vlag-label (uit: " + ", ".join(optional_flags or ["GEEN"]) + ")\n"
         "Selecteer labels ALLEEN uit de bovenstaande lijsten. Gebruik maximaal één per categorie.\n"
         "Als een categorie geen geschikte label heeft, vul die in als GEEN.\n"
-        "Als een email niet belangrijk is, kies dan VERWIJDEREN als actie. De bedoeling is immers om de mailbox op te ruimen.\n"
+        "Als een e-mail niet belangrijk is, kies dan VERWIJDEREN als actie. De bedoeling is immers om de mailbox op te ruimen.\n"
         "Geef altijd een korte onderbouwing voor je keuze. \n\n"
         f"Afzender: {sender}\n"
         f"Onderwerp: {subject}\n"
