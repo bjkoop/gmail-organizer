@@ -1,6 +1,7 @@
 import os
 import base64
 import re
+import html as html_lib
 from email.utils import parsedate_to_datetime
 from typing import List
 
@@ -75,6 +76,31 @@ def extract_message_text(payload):
     return "\n".join(t for t in texts if t)
 
 
+def extract_message_html(payload):
+    """Extract the first available HTML body from a Gmail message payload.
+    Falls back to None if no HTML part is found.
+    """
+    mime = payload.get("mimeType", "")
+    body = payload.get("body", {})
+    data = body.get("data")
+
+    # Direct HTML part
+    if data and mime.startswith("text/html"):
+        try:
+            return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+        except Exception:
+            return None
+
+    # Multipart: search parts, prefer HTML
+    parts = payload.get("parts", [])
+    for part in parts:
+        found = extract_message_html(part)
+        if found:
+            return found
+
+    return None
+
+
 def load_inbox_ids(max_fetch: int = 200):
     """Load up to max_fetch message IDs from INBOX into MESSAGE_IDS."""
     global MESSAGE_IDS
@@ -145,7 +171,13 @@ def api_message_item():
         if "<" in sender:
             sender = sender.split("<")[0].strip()
 
-        full_text = extract_message_text(msg.get("payload", {})) or ""
+        payload = msg.get("payload", {})
+        full_text = extract_message_text(payload) or ""
+        body_html = extract_message_html(payload)
+        if not body_html:
+            # Fallback: escape plain text and convert line breaks
+            escaped = html_lib.escape(full_text)
+            body_html = f"<div>{escaped.replace('\n', '<br>')}</div>"
         current_label_ids = msg.get("labelIds", [])
         current_labels = [LABEL_MAP.get(lid, lid) for lid in current_label_ids]
 
@@ -155,6 +187,7 @@ def api_message_item():
             "sender": sender,
             "date": date_formatted,
             "body": full_text,
+            "bodyHtml": body_html,
             "labels": current_labels,
             "index": index,
             "total": len(MESSAGE_IDS),

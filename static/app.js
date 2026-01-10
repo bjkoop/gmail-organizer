@@ -48,7 +48,18 @@ async function loadMessage(index) {
   document.getElementById('subject').textContent = data.subject || '(geen onderwerp)';
   document.getElementById('sender').textContent = data.sender || '(afzender onbekend)';
   document.getElementById('date').textContent = data.date || '(datum onbekend)';
-  document.getElementById('content').textContent = data.body || '';
+  const contentEl = document.getElementById('content');
+  const html = data.bodyHtml || '';
+  if (window.DOMPurify) {
+    contentEl.innerHTML = DOMPurify.sanitize(html);
+  } else {
+    // Fallback: insert as-is (local app), or plain text
+    try {
+      contentEl.innerHTML = html;
+    } catch (e) {
+      contentEl.textContent = data.body || '';
+    }
+  }
   renderLabels(currentLabels);
   renderIndex();
 }
