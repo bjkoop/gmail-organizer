@@ -10,7 +10,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from gmail_service import (
+from services.gmail_service import (
   get_all_labels,
   get_label_map,
   apply_label,
@@ -20,7 +20,7 @@ from gmail_service import (
   delete_message,
   untrash_message,
 )
-from openai_service import get_mail_recommendation
+from services.openai_service import get_mail_recommendation
 
 # If modifying these scopes, delete the file token.json.
 SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]

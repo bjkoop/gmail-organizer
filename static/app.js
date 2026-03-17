@@ -4,6 +4,7 @@ let currentMessageId = null;
 let currentLabels = [];
 let availableLabels = [];
 let analysisText = null;
+let currentMailbox = 'inbox';
 
 async function fetchJSON(url, opts) {
   const res = await fetch(url, opts);
@@ -32,13 +33,13 @@ async function loadAvailableLabels() {
 }
 
 async function loadCount() {
-  const data = await fetchJSON('/api/messages/count');
+  const data = await fetchJSON(`/api/messages/count?mailbox=${currentMailbox}`);
   total = data.count || 0;
   renderIndex();
 }
 
 async function loadMessage(index) {
-  const data = await fetchJSON(`/api/messages/item?index=${index}`);
+  const data = await fetchJSON(`/api/messages/item?index=${index}&mailbox=${currentMailbox}`);
   currentIndex = data.index;
   total = data.total;
   currentMessageId = data.id;
@@ -151,6 +152,21 @@ async function init() {
     await loadMessage(0);
   }
   // Bindings
+  document.getElementById('mailbox-selector').addEventListener('change', async (e) => {
+    currentMailbox = e.target.value;
+    currentIndex = 0;
+    await loadCount();
+    if (total > 0) {
+      await loadMessage(0);
+    } else {
+      // Clear display if no messages
+      document.getElementById('subject').textContent = '(geen berichten)';
+      document.getElementById('sender').textContent = '';
+      document.getElementById('date').textContent = '';
+      document.getElementById('content').innerHTML = '';
+      document.getElementById('labels').innerHTML = '';
+    }
+  });
   document.getElementById('btn-prev').addEventListener('click', async () => {
     if (currentIndex > 0) await loadMessage(currentIndex - 1);
   });

@@ -13,7 +13,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from gmail_service import (
+from services.gmail_service import (
     get_all_labels,
     get_label_map,
     apply_label,
@@ -21,7 +21,7 @@ from gmail_service import (
     archive_message,
     delete_message,
 )
-from openai_service import get_mail_recommendation
+from services.openai_service import get_mail_recommendation
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 
@@ -101,15 +101,27 @@ def extract_message_html(payload):
     return None
 
 
-def load_inbox_ids(max_fetch: int = 200):
-    """Load up to max_fetch message IDs from INBOX into MESSAGE_IDS."""
-    global MESSAGE_IDS
+def load_inbox_ids(max_fetch: int = 200, mailbox: str = "inbox"):
+    """Load up to max_fetch message IDs from specified mailbox into MESSAGE_IDS.
+
+    Args:
+        max_fetch: Maximum number of messages to fetch
+        mailbox: Either 'inbox' for inbox only, or 'all' for all mail
+    """
+    global MESSAGE_IDS, SERVICE
+    if SERVICE is None:
+        init_service()
+    assert SERVICE is not None
+
     MESSAGE_IDS = []
     next_page_token = None
     fetched = 0
     try:
         while True:
-            params = {"userId": "me", "q": "in:inbox", "maxResults": 100}
+            params = {"userId": "me", "maxResults": 100}
+            # Only filter by inbox if mailbox is 'inbox'
+            if mailbox == "inbox":
+                params["q"] = "in:inbox"
             if next_page_token:
                 params["pageToken"] = next_page_token
             results = SERVICE.users().messages().list(**params).execute()
@@ -140,15 +152,27 @@ def api_labels():
 
 @app.route("/api/messages/count", methods=["GET"])
 def api_messages_count():
+    mailbox = request.args.get("mailbox", "inbox")
+    load_inbox_ids(max_fetch=500, mailbox=mailbox)
     return jsonify({"count": len(MESSAGE_IDS)})
 
 
 @app.route("/api/messages/item", methods=["GET"])
 def api_message_item():
+    global SERVICE
+    if SERVICE is None:
+        init_service()
+    assert SERVICE is not None
+
     try:
         index = int(request.args.get("index", "0"))
     except ValueError:
-        return jsonify({"error": "Invalid index"}), 400
+        index = 0
+
+    mailbox = request.args.get("mailbox", "inbox")
+    # Reload messages if mailbox parameter is present to ensure we have the right set
+    if mailbox:
+        load_inbox_ids(max_fetch=500, mailbox=mailbox)
     if index < 0 or index >= len(MESSAGE_IDS):
         return jsonify({"error": "Index out of range"}), 404
 
@@ -198,6 +222,10 @@ def api_message_item():
 
 @app.route("/api/messages/<message_id>/labels", methods=["POST"])
 def api_set_labels(message_id):
+    global SERVICE
+    if SERVICE is None:
+        init_service()
+    assert SERVICE is not None
     data = request.get_json(silent=True) or {}
     desired_labels = data.get("labels", [])
     if not isinstance(desired_labels, list):
@@ -235,12 +263,20 @@ def api_set_labels(message_id):
 
 @app.route("/api/messages/<message_id>/archive", methods=["POST"])
 def api_archive(message_id):
+    global SERVICE
+    if SERVICE is None:
+        init_service()
+    assert SERVICE is not None
     ok = archive_message(SERVICE, message_id)
     return jsonify({"archived": ok})
 
 
 @app.route("/api/messages/<message_id>/delete", methods=["POST"])
 def api_delete(message_id):
+    global SERVICE
+    if SERVICE is None:
+        init_service()
+    assert SERVICE is not None
     ok = delete_message(SERVICE, message_id)
     return jsonify({"deleted": ok})
 
@@ -255,6 +291,10 @@ def api_get_analysis(message_id):
 
 @app.route("/api/messages/<message_id>/analyze", methods=["POST"])
 def api_analyze(message_id):
+    global SERVICE
+    if SERVICE is None:
+        init_service()
+    assert SERVICE is not None
     # If cached, return cached without re-generating
     if message_id in ANALYSIS_CACHE:
         return jsonify({"text": ANALYSIS_CACHE[message_id], "cached": True})

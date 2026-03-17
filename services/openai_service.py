@@ -1,7 +1,7 @@
 from openai import AzureOpenAI
 import json
 import re
-from config import (
+from services.config import (
     AZURE_OPENAI_API_KEY,
     AZURE_OPENAI_ENDPOINT,
     AZURE_OPENAI_MODEL_DEPLOYMENT,
