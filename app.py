@@ -201,7 +201,8 @@ def api_message_item():
         if not body_html:
             # Fallback: escape plain text and convert line breaks
             escaped = html_lib.escape(full_text)
-            body_html = f"<div>{escaped.replace('\n', '<br>')}</div>"
+            escaped_with_breaks = escaped.replace("\n", "<br>")
+            body_html = f"<div>{escaped_with_breaks}</div>"
         current_label_ids = msg.get("labelIds", [])
         current_labels = [LABEL_MAP.get(lid, lid) for lid in current_label_ids]
 
